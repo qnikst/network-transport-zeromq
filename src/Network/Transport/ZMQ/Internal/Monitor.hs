@@ -24,7 +24,7 @@ import            GHC.Generics (Generic)
 
 data MonitorControl = MonitorNew String
                     | MonitorDelete String
-                    deriving (Generic)
+                    deriving (Generic, Show)
 
 instance Binary MonitorControl
 
@@ -38,18 +38,22 @@ monitorThread ctx addr f =
                  $ \evs -> bracket messageInit
                                       messageClose
                  $ \msg -> forever $ do
-                     [cEv,eEv] <- ZMQ.poll 0 [ Sock control [In] Nothing
-                                             , Sock evs  [In] Nothing
-                                             ]
+		     putStrLn $ addr ++ " waiting.."
+                     [cEv,eEv] <- ZMQ.poll (-1) [ Sock control [In] Nothing
+                                                , Sock evs  [In] Nothing
+                                                ]
                      unless (null cEv) $ processControl evs control
                      unless (null eEv) $ processEvent   evs msg)
   where
     processControl evs socket = do
+    	putStrLn $ "process control"
         msg <- receive socket
         case decode (BL.fromChunks [msg]) of
           MonitorNew addr -> do
+	      putStrLn $ "connect: " ++ addr
               connect evs addr
           MonitorDelete addr -> do
+	      putStrLn $ "delete: " ++ addr
               disconnect evs addr
     processEvent evs m = onSocket "read" evs $ \s -> do
         throwIfMinus1RetryMayBlock_ "retry"

@@ -8,6 +8,7 @@ module Network.Transport.ZMQ.Internal
   , bindFromRangeRandomM
   , authManager
   , closeZeroLinger
+  , uniqAddr
   )
   where
 
@@ -20,6 +21,7 @@ import System.Random ( randomRIO )
 import Text.Printf
 
 
+import           System.ZMQ4.Internal
 import           System.ZMQ4.Monadic
       ( ZMQ
       )
@@ -88,3 +90,7 @@ closeZeroLinger :: P.Socket a -> IO ()
 closeZeroLinger sock = do
   P.setLinger (P.restrict (0::Int)) sock
   P.close sock
+
+-- | Generate an unique address  for the gived socket.
+uniqAddr :: P.Socket a -> String
+uniqAddr sock = "inproc://" ++ show (_socket . _socketRepr $ sock) ++ ".pair"
