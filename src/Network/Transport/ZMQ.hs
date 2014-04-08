@@ -378,10 +378,11 @@ endPointCreate params ctx addr = do
                                  <*> pure port
           opened <- newIORef True
           mask $ \restore -> do
-              let monAddr = "inproc://ep-monitor." ++ show port
+              let monAddr = "inproc://ep-monitor-" ++ show port ++ ".rep"
               thread <- Async.async $ (restore (receiver pull lep chOut))
                                `finally` finalizeEndPoint lep port pull
               mon <- Async.async $ monitorThread ctx monAddr monitorProcess
+              threadDelay 5000
               putMVar (localEndPointState lep) $ LocalEndPointValid
                 (ValidLocalEndPoint chOut (Counter 0 Map.empty) Map.empty thread opened Map.empty (monAddr, mon))
               return $ Right (port, lep, chOut))
@@ -733,6 +734,7 @@ createOrGetRemoteEndPoint params ctx ourEp theirAddr = join $ do
   where
     create v m = do
       push <- ZMQ.socket ctx ZMQ.Push
+      ZMQ.socketMonitor [ZMQ.AllEvents] (fst $ _localEndPointMonitor v) push
       case authMethod params of
           Nothing -> return ()
           Just (AuthPlain p u) -> do
