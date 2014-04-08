@@ -129,6 +129,7 @@ data ValidLocalEndPoint = ValidLocalEndPoint
     -- ^ list of multicast nodes
   , _localEndPointMonitor     :: !(Socket ZMQ.Pair, Async ())
     -- ^ socket monitor process
+  , _localEndPointMaxId       :: !(IORef Int)
   }
 
 data ZMQConnection = ZMQConnection
@@ -154,6 +155,7 @@ data RemoteEndPoint = RemoteEndPoint
   { remoteEndPointAddress :: !EndPointAddress
   , remoteEndPointState   :: !(MVar RemoteEndPointState)
   , remoteEndPointOpened  :: !(IORef Bool)
+  , remoteEndPointId      :: !Int
   }
 
 data RemoteEndPointState

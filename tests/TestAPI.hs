@@ -15,73 +15,43 @@ main :: IO ()
 main = finish <=< trySome $ do
     putStr "simple: "
     Right (zmq, transport) <- createTransportEx defaultZMQParameters "127.0.0.1"
-    putStrLn "1: ep1 <- EP"
     Right ep1 <- newEndPoint transport
-    putStrLn "2: ep2 <- EP"
     Right ep2 <- newEndPoint transport
-    putStrLn "3: c1 <- c ep1->ep2"
     Right c1  <- connect ep1 (address ep2) ReliableOrdered defaultConnectHints
-    putStrLn "4: c2 <- c ep2->ep1"
     Right c2  <- connect ep2 (address ep1) ReliableOrdered defaultConnectHints
-    putStrLn "5: send c1"
     Right _   <- send c1 ["123"]
-    putStrLn "6: send c2"
     Right _   <- send c2 ["321"]
-    putStrLn "7: close c1"
     close c1
-    putStrLn "8: close c2"
     close c2
-    putStrLn "9: events.."
     [ConnectionOpened 1 ReliableOrdered _, Received 1 ["321"], ConnectionClosed 1] <- replicateM 3 $ receive ep1
-    putStrLn "10: events.."
     [ConnectionOpened 1 ReliableOrdered _, Received 1 ["123"], ConnectionClosed 1] <- replicateM 3 $ receive ep2
-    putStrLn "11"
     putStrLn "OK"
 
     putStr "connection break: "
     Right ep3 <- newEndPoint transport
-    putStrLn "12: ep3 <- EP"
 
-    putStrLn "12.5: c21: ep1 -> ep2"
     Right c21  <- connect ep1 (address ep2) ReliableOrdered defaultConnectHints
-    putStrLn "13: c22: ep2 -> ep1"
     Right c22  <- connect ep2 (address ep1) ReliableOrdered defaultConnectHints
-    putStrLn "14: c23: ep3 -> ep1"
     Right c23  <- connect ep3 (address ep1) ReliableOrdered defaultConnectHints
-    putStrLn "15"
 
     ConnectionOpened 2 ReliableOrdered _ <- receive ep2
-    putStrLn "16"
     ConnectionOpened 2 ReliableOrdered _ <- receive ep1
-    putStrLn "17"
     ConnectionOpened 3 ReliableOrdered _ <- receive ep1
-    putStrLn "18"
 
     breakConnection zmq (address ep1) (address ep2)
-    putStrLn "19"
 
     ErrorEvent (TransportError (EventConnectionLost _ ) _) <- receive $ ep1
-    putStrLn "20"
     ErrorEvent (TransportError (EventConnectionLost _ ) _) <- receive $ ep2
-    putStrLn "21"
 
     Left (TransportError SendFailed _) <- send c21 ["test"]
-    putStrLn "22"
     Left (TransportError SendFailed _) <- send c22 ["test"]
-    putStrLn "23"
 
     Left (TransportError SendFailed _) <- send c23 ["test"]
-    putStrLn "24"
     ErrorEvent (TransportError (EventConnectionLost _) _ ) <- receive ep1
-    putStrLn "25: c24: ep3 -> ep1"
     Right c24 <- connect ep3 (address ep1) ReliableOrdered defaultConnectHints
-    putStrLn "26"
     Right ()  <- send c24 ["final"]
-    putStrLn "27"
     ConnectionOpened 4 ReliableOrdered _ <- receive ep1
-    putStrLn "28"
     Received 4 ["final"] <- receive ep1
-    putStrLn "29"
     putStrLn "OK"
     multicast transport
     putStr "Register cleanup test:"
@@ -113,7 +83,7 @@ main = finish <=< trySome $ do
         
         putStr "Auth:"
         Right tr2 <- createTransport
-                       defaultZMQParameters {authorizationType=ZMQAuthPlain "user" "password"}
+                       defaultZMQParameters {authMethod=Just $ AuthPlain "user" "password"}
                        "127.0.0.1"
         Right ep3 <- newEndPoint tr2
         Right ep4 <- newEndPoint tr2

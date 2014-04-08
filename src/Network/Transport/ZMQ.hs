@@ -342,7 +342,7 @@ apiCloseEndPoint :: ZMQTransport
 apiCloseEndPoint transport lep = mask_ $ do
     old <- readMVar (localEndPointState lep)
     case old of
-      LocalEndPointValid (ValidLocalEndPoint x _ _ threadId _ _ _) -> do
+      LocalEndPointValid (ValidLocalEndPoint x _ _ threadId _ _ _ _) -> do
         -- close channel, no events will be received
         atomically $ do
           writeTMChan x EndPointClosed
@@ -381,8 +381,9 @@ endPointCreate params ctx addr = do
               thread <- Async.async $ (restore (receiver pull lep chOut))
                                `finally` finalizeEndPoint lep port pull
               (monControl, mon) <- monitorThread ctx monAddr monitorProcess
+	      maxId <- newIORef 0
               putMVar (localEndPointState lep) $ LocalEndPointValid
-                (ValidLocalEndPoint chOut (Counter 0 Map.empty) Map.empty thread opened Map.empty (monControl, mon))
+                (ValidLocalEndPoint chOut (Counter 0 Map.empty) Map.empty thread opened Map.empty (monControl, mon) maxId)
               return $ Right (port, lep, chOut))
           `onException` (ZMQ.close pull)
       Left (_e::SomeException)  -> do
@@ -716,7 +717,7 @@ createOrGetRemoteEndPoint :: ZMQParameters
                           -> IO (Either ZMQError RemoteEndPoint)
 createOrGetRemoteEndPoint params ctx ourEp theirAddr = join $ do
     modifyMVar (localEndPointState ourEp) $ \case
-      LocalEndPointValid v@(ValidLocalEndPoint _ _ m _ o _ _) -> do
+      LocalEndPointValid v@(ValidLocalEndPoint _ _ m _ o _ _ _) -> do
         opened <- readIORef o
         if opened
         then do
@@ -734,10 +735,10 @@ createOrGetRemoteEndPoint params ctx ourEp theirAddr = join $ do
   where
     create v m = do
       push <- ZMQ.socket ctx ZMQ.Push
-      let monAddress = ZMQ.uniqAddr push
+      rid  <- atomicModifyIORef' (_localEndPointMaxId v) (\t -> (succ t, t))
+      let monAddress = ZMQ.uniqAddr push ++ "." ++ show rid
       ZMQ.socketMonitor [ZMQ.AllEvents] monAddress push
       ZMQ.send (fst $ _localEndPointMonitor v) [] (encode' $ MonitorNew monAddress)
-      ZMQ.socketMonitor [ZMQ.AllEvents] (fst $ _localEndPointMonitor v) push
       case authMethod params of
           Nothing -> return ()
           Just (AuthPlain p u) -> do
@@ -745,7 +746,7 @@ createOrGetRemoteEndPoint params ctx ourEp theirAddr = join $ do
               ZMQ.setPlainUserName (ZMQ.restrict u) push
       state <- newMVar . RemoteEndPointPending =<< newIORef []
       opened <- newIORef False
-      let rep = RemoteEndPoint theirAddr state opened
+      let rep = RemoteEndPoint theirAddr state opened rid
       return ( LocalEndPointValid v{ _localEndPointRemotes = Map.insert theirAddr rep m}
              , initialize push rep >> return (Right rep))
     ourAddr = localEndPointAddress ourEp
@@ -754,10 +755,11 @@ createOrGetRemoteEndPoint params ctx ourEp theirAddr = join $ do
       x <- Async.async $ do
          takeMVar lock
          ZMQ.connect push (B8.unpack $ endPointAddressToByteString theirAddr)
-      monitor <- ZMQ.monitor [ZMQ.ConnectedEvent] ctx push
+      --monitor <- ZMQ.monitor [ZMQ.ConnectedEvent] ctx push
       putMVar lock ()
-      r <- Async.race (threadDelay 100000) (monitor True)
-      void $ monitor False
+      let r = Right ()
+      --r <- Async.race (threadDelay 100000) (monitor True)
+      --void $ monitor False
       case r of
         Left _ -> do
           _ <- swapMVar (remoteEndPointState rep) RemoteEndPointFailed
@@ -788,7 +790,8 @@ cleanupRemoteEndPoint lep rep actions = modifyMVar (localEndPointState lep) $ \c
       oldState <- swapMVar (remoteEndPointState rep) newState
       case oldState of
         RemoteEndPointValid w -> do
-	  ZMQ.send (fst $ _localEndPointMonitor v) [] (encode' $ MonitorDelete $ ZMQ.uniqAddr $ _remoteEndPointChan w)
+	  ZMQ.send (fst $ _localEndPointMonitor v) [] 
+	           (encode' $ MonitorDelete $ (ZMQ.uniqAddr $ _remoteEndPointChan w) ++ (show $ remoteEndPointId rep))
           let (Counter _ cn) = _remoteEndPointPendingConnections w
           traverse_ (\c -> void $ swapMVar (connectionState c) ZMQConnectionFailed) cn
           cn' <- foldM
@@ -848,7 +851,8 @@ remoteEndPointClose silent lep rep = do
        LocalEndPointClosed -> return ()
        LocalEndPointValid v -> do
        	 -- unsubscribe monitor
-	 ZMQ.send (fst $ _localEndPointMonitor v) [] (encode' $ MonitorDelete $ ZMQ.uniqAddr c)
+	 ZMQ.send (fst $ _localEndPointMonitor v) []
+	          (encode' $ MonitorDelete $ (ZMQ.uniqAddr c) ++ (show $ remoteEndPointId rep))
          -- notify about all connections close (?) do we really want it?
          traverse_ (atomically . writeTMChan (_localEndPointChan v) . ConnectionClosed) (Set.toList s)
          -- if we have outgoing connections, then we have connection error
