@@ -127,6 +127,8 @@ data ValidLocalEndPoint = ValidLocalEndPoint
     -- ^ is remote endpoint opened
   , _localEndPointMulticastGroups :: !(Map MulticastAddress ZMQMulticastGroup)
     -- ^ list of multicast nodes
+  , _localEndPointMonitor     :: !(String, Async ())
+    -- ^ socket monitor process
   }
 
 data ZMQConnection = ZMQConnection

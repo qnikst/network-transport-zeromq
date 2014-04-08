@@ -37,6 +37,7 @@ module Network.Transport.ZMQ
   ) where
 
 import Network.Transport.ZMQ.Internal.Types
+import Network.Transport.ZMQ.Internal.Monitor
 import qualified Network.Transport.ZMQ.Internal as ZMQ
 
 import           Control.Applicative
@@ -341,13 +342,14 @@ apiCloseEndPoint :: ZMQTransport
 apiCloseEndPoint transport lep = mask_ $ do
     old <- readMVar (localEndPointState lep)
     case old of
-      LocalEndPointValid (ValidLocalEndPoint x _ _ threadId _ _) -> do
+      LocalEndPointValid (ValidLocalEndPoint x _ _ threadId _ _ m) -> do
         -- close channel, no events will be received
         atomically $ do
           writeTMChan x EndPointClosed
           closeTMChan x
         Async.cancel threadId
-        void $ Async.waitCatch threadId
+        Async.cancel $! snd m
+        void $! Async.waitCatch threadId
       LocalEndPointClosed -> return ()
     modifyMVar_ (_transportState transport) $ \case
       TransportClosed  -> return TransportClosed
@@ -376,10 +378,12 @@ endPointCreate params ctx addr = do
                                  <*> pure port
           opened <- newIORef True
           mask $ \restore -> do
+              let monAddr = "inproc://ep-monitor." ++ show port
               thread <- Async.async $ (restore (receiver pull lep chOut))
                                `finally` finalizeEndPoint lep port pull
+              mon <- Async.async $ monitorThread ctx monAddr monitorProcess
               putMVar (localEndPointState lep) $ LocalEndPointValid
-                (ValidLocalEndPoint chOut (Counter 0 Map.empty) Map.empty thread opened Map.empty)
+                (ValidLocalEndPoint chOut (Counter 0 Map.empty) Map.empty thread opened Map.empty (monAddr, mon))
               return $ Right (port, lep, chOut))
           `onException` (ZMQ.close pull)
       Left (_e::SomeException)  -> do
@@ -546,6 +550,7 @@ endPointCreate params ctx addr = do
             ZMQ.unbind pull (addr ++ ":" ++ show port)
             ZMQ.close pull
       void $ swapMVar (localEndPointState ourEp) LocalEndPointClosed
+    monitorProcess x = print x
 
 apiSend :: ZMQConnection -> [ByteString] -> IO (Either (TransportError SendErrorCode) ())
 #ifdef UNSAFE_SEND
@@ -710,7 +715,7 @@ createOrGetRemoteEndPoint :: ZMQParameters
                           -> IO (Either ZMQError RemoteEndPoint)
 createOrGetRemoteEndPoint params ctx ourEp theirAddr = join $ do
     modifyMVar (localEndPointState ourEp) $ \case
-      LocalEndPointValid v@(ValidLocalEndPoint _ _ m _ o _) -> do
+      LocalEndPointValid v@(ValidLocalEndPoint _ _ m _ o _ _) -> do
         opened <- readIORef o
         if opened
         then do
