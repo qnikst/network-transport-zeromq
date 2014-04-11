@@ -15,6 +15,7 @@ module Network.Transport.ZMQ.Internal.Types
   , RemoteEndPointState(..)
   , ValidRemoteEndPoint(..)
   , ClosingRemoteEndPoint(..)
+  , PendingRemoteEndPoint(..)
     -- ** LocalEndPoint
   , LocalEndPoint(..)
   , LocalEndPointState(..)
@@ -38,6 +39,7 @@ module Network.Transport.ZMQ.Internal.Types
 import Control.Concurrent.Async
 import Control.Concurrent.MVar
 import Control.Concurrent.STM.TMChan
+import Control.Concurrent.STM.TMVar
 import Data.Word
 import Data.ByteString
 import Data.IORef
@@ -162,7 +164,7 @@ data RemoteEndPointState
   = RemoteEndPointValid ValidRemoteEndPoint
   | RemoteEndPointClosed
   | RemoteEndPointFailed
-  | RemoteEndPointPending (IORef [RemoteEndPointState -> IO RemoteEndPointState])
+  | RemoteEndPointPending PendingRemoteEndPoint
   | RemoteEndPointClosing ClosingRemoteEndPoint
 
 data ValidRemoteEndPoint = ValidRemoteEndPoint
@@ -170,6 +172,11 @@ data ValidRemoteEndPoint = ValidRemoteEndPoint
   , _remoteEndPointPendingConnections   :: !(Counter ConnectionId ZMQConnection)
   , _remoteEndPointIncommingConnections :: !(Set ConnectionId)
   , _remoteEndPointOutgoingCount        :: !Int
+  }
+
+data PendingRemoteEndPoint = PendingRemoteEndPoint
+  { _remoteEndPointPending              :: !(TMVar Bool)
+  , _remoteEndPointDelayedActions       :: !(IORef [RemoteEndPointState -> IO RemoteEndPointState])
   }
 
 data ClosingRemoteEndPoint = ClosingRemoteEndPoint
